@@ -33,9 +33,12 @@ from aider.run_cmd import run_cmd
 from aider.sendchat import RETRY_TIMEOUT, retry_exceptions, send_completion
 from aider.utils import format_content, format_messages, format_tokens, is_image_file
 
+from aider.base_coder import FinishReasonLength
+
 from ..dump import dump  # noqa: F401
 from .chat_chunks import ChatChunks
-class Rollbback(aider.Coder):
+class RollbbackCoder(aider.Coder):
+        
         def send_message(self, inp):
             import openai  # for error codes below
 
@@ -233,6 +236,25 @@ class Rollbback(aider.Coder):
             except Exception:
                 return (-1, -1)
         def performance_improving(history, passed, failed):
+            if history == []:
+                return True
+            if history[-1][0] + history[-1][1] != passed+failed:
+                return True
+            return passed<history[-1][0]
+def parse_test_results(test_string):
+            failed = -1
+            passed = -1  
+            try:
+                failed_match = re.search(r'(\d+)\s+failed', test_string)
+                if failed_match:
+                    failed = int(failed_match.group(1))
+                passed_match = re.search(r'(\d+)\s+passed', test_string)
+                if passed_match:
+                    passed = int(passed_match.group(1))       
+                return (failed, passed)
+            except Exception:
+                return (-1, -1)
+def performance_improving(history, passed, failed):
             if history == []:
                 return True
             if history[-1][0] + history[-1][1] != passed+failed:
