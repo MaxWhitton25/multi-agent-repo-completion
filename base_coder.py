@@ -37,7 +37,7 @@ from aider.base_coder import FinishReasonLength
 
 from ..dump import dump  # noqa: F401
 from .chat_chunks import ChatChunks
-class RollbbackCoder(aider.Coder):
+class RollbackCoder(aider.Coder):
         
         def send_message(self, inp):
             import openai  # for error codes below
