@@ -14,7 +14,7 @@ from commit0.harness.get_pytest_ids import main as get_tests
 from commit0.harness.constants import RUN_AGENT_LOG_DIR, RepoInstance
 from pathlib import Path
 from datetime import datetime
-from base_coder import RollbackCoder
+#from custom_base_coder import RollbackCoder
 
 import yaml
 import multiprocessing
@@ -24,7 +24,6 @@ from agent.agent_utils import (
     create_branch,
     get_message,
     get_target_edit_files,
-    get_changed_files_from_commits,
     update_message_with_dependencies,
     get_lint_cmd,
     read_yaml_config,

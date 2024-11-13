@@ -6,7 +6,6 @@ import subprocess
 from dotenv import load_dotenv
 from custom_commit0 import custom_run_agent_for_repo
 
-
 def get_args():
   parser = argparse.ArgumentParser()
   parser.add_argument("--split", type=str, default='parsel', help="The split of commit0 to implement and run unit test cases with.")
