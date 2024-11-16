@@ -14,7 +14,6 @@ from git import Repo
 from agent.agent_utils import (
     create_branch,
     get_message,
-    get_tests,
     get_target_edit_files,
     get_changed_files_from_commits,
     update_message_with_dependencies,
@@ -167,9 +166,12 @@ def custom_run_agent_team_for_repo(
                 implement_message = f"Complete the following task, implementing the relevant incomplete function(s) (i.e., those with pass statements): \n{description}"
                 #TODO: fix the display (right now it just displys one file)
                 
+                second_half_of_test_cmd = f"--branch {branch} --commit0-config-file {commit0_config_file}"
+
+                
                 #TODO: MAKE THE DEBUG/CODER AGENT IMPLEMENT THE ORIGINAL TASK
                 agent_return = coder_agent.run(implement_message, 
-                                               "", 
+                                               second_half_of_test_cmd, 
                                                lint_cmd, 
                                                [file_name], 
                                                file_log_dir, 
@@ -258,15 +260,16 @@ class DebugAgent(AiderAgents):
         for test_file in test_files:
             if fnames[0][8:-4] in test_file:
                 for _ in range(2): # try to fix errrors in a file twice
-                    test_cmd = f"python -m commit0 test {repo_name} {test_file} --branch commit0 --commit0-config-file ../../.commit0.yaml"
+                    test_cmd = f"python -m commit0 test {repo_name} {test_file} " + test_cmd
                     # string of pytest output
                     test_errors = coder.commands.cmd_test(test_cmd)
                     # raise RuntimeError(test_errors)
                     
                     # test output for each test case
-                    header_pattern = r"_{4,} (\w+\.\w+) _{4,}"
-                    split_sections = re.split(header_pattern, test_errors)
-                    test_output_list = [split_sections[i] + split_sections[i + 1] for i in range(1, len(header_pattern) - 1, 2)]   
+                    header_pattern = r"_{4,} .+ _{4,}"
+                    split_sections = re.split(header_pattern, test_errors)        
+                    
+                    test_output_list = [split_sections[i] + split_sections[i + 1] for i in range(1, len(split_sections) - 1, 2)]   
 
                     for test_out in test_output_list:
                         if "FAILED" not in test_out and "FFF" not in test_out:
