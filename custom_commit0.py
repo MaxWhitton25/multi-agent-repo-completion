@@ -1,5 +1,6 @@
 import sys
 import os
+import bz2
 
 from pathlib import Path
 import logging
@@ -7,7 +8,9 @@ import logging
 from aider.io import InputOutput
 from agent.class_types import AgentConfig
 from agent.run_agent import DirContext
-from agent.agents import AiderAgents, AgentReturn, handle_logging
+from agent.agents import AiderAgents, AgentReturn, AiderReturn, handle_logging
+from aider.coders import Coder
+
 
 from commit0.harness.constants import SPLIT
 from commit0.harness.get_pytest_ids import main as get_tests
@@ -105,6 +108,66 @@ class RollbackAgents(AiderAgents):
         sys.stderr = sys.__stderr__
 
         return AgentReturn(log_file)
+    
+class ManagerAgent(AiderAgents):
+        
+    def run(
+        self,
+        message: str,
+        fnames: list[str],
+        log_dir: Path,
+    ) -> AgentReturn:
+        """Start agent manager"""
+        
+        log_dir = log_dir.resolve()
+        log_dir.mkdir(parents=True, exist_ok=True)
+        input_history_file = log_dir / ".manager.input.history"
+        chat_history_file = log_dir / ".manager.chat.history.md"
+
+        # Set up logging
+        log_file = log_dir / "manager.log"
+        logging.basicConfig(
+            filename=log_file,
+            level=logging.INFO,
+            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        )
+
+        # Redirect print statements to the log file
+        sys.stdout = open(log_file, "a")
+        sys.stderr = open(log_file, "a")
+
+        # Configure httpx and backoff logging
+        handle_logging("httpx", log_file)
+        handle_logging("backoff", log_file)
+        
+        # Get the specifications
+        with bz2.open("spec.pdf.bz2", "rb") as in_file:
+            with open("spec.pdf", "wb") as out_file:
+                out_file.write(in_file.read())
+
+        io = InputOutput(
+            yes=False,
+            input_history_file=input_history_file,
+            chat_history_file=chat_history_file,
+        )
+        manager = Coder.create(
+            edit_format="ask",
+            main_model=self.model,
+            read_only_fnames=fnames + ["spec.pdf"],
+            io=io,
+        )
+        manager.max_reflection = self.max_iteration
+        manager.stream = True
+        
+        manager.run(message)
+
+        sys.stdout.close()
+        sys.stderr.close()
+        # Restore original stdout and stderr
+        sys.stdout = sys.__stdout__
+        sys.stderr = sys.__stderr__
+
+        return AiderReturn(log_file)
     
 def custom_run_agent_for_repo(
     repo_base_dir: str,
