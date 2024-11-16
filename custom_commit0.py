@@ -21,6 +21,7 @@ from agent.agent_utils import (
 )
 from agent.agents import AiderAgents, AgentReturn, AiderReturn, handle_logging
 from aider.coders import Coder
+from aider.models import Model
 import json
 from agent.class_types import AgentConfig
 from commit0.harness.constants import SPLIT
@@ -308,6 +309,108 @@ def custom_run_agent_team_for_repo(
             json.dump(eval_results, f)
 
     update_queue.put(("finish_repo", repo_name))
+
+
+class DebugAgent(AiderAgents):
+    def __init__(self, max_iteration: int, model_name: str):
+        super().__init__(max_iteration)
+        self.model = Model(model_name)
+        # Check if API key is set for the model
+        if "gpt" in model_name:
+            api_key = os.environ.get("OPENAI_API_KEY", None)
+        elif "claude" in model_name:
+            api_key = os.environ.get("ANTHROPIC_API_KEY", None)
+        elif "gemini" in model_name:
+            api_key = os.environ.get("API_KEY", None)
+        else:
+            raise ValueError(f"Unsupported model: {model_name}")
+
+        if not api_key:
+            raise ValueError(
+                "API Key Error: There is no API key associated with the model for this agent. "
+                "Edit model_name parameter in .agent.yaml, export API key for that model, and try again."
+            )
+        
+    def run(
+        self,
+        message: str,
+        test_cmd: str,
+        lint_cmd: str,
+        fnames: list[str],
+        log_dir: Path,
+        test_first: bool = False,
+        lint_first: bool = False,
+        test_files_all: list[str] = [],
+        repo_name: str = "parsel",
+    ) -> AgentReturn:
+        if test_cmd:
+            auto_test = True
+        else:
+            auto_test = False
+        if lint_cmd:
+            auto_lint = True
+        else:
+            auto_lint = False
+        log_dir = log_dir.resolve()
+        log_dir.mkdir(parents=True, exist_ok=True)
+        input_history_file = log_dir / ".aider.input.history"
+        chat_history_file = log_dir / ".aider.chat.history.md"
+
+        # Set up logging
+        log_file = log_dir / "aider.log"
+        logging.basicConfig(
+            filename=log_file,
+            level=logging.INFO,
+            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        )
+
+        # Redirect print statements to the log file
+        sys.stdout = open(log_file, "a")
+        sys.stderr = open(log_file, "a")
+
+        # Configure httpx and backoff logging
+        handle_logging("httpx", log_file)
+        handle_logging("backoff", log_file)
+
+        test_files = sorted(list(set([i.split(":")[0] for i in test_files_all])))
+
+        io = InputOutput(
+            yes=True,
+            input_history_file=input_history_file,
+            chat_history_file=chat_history_file,
+        )
+
+        coder = Coder.create(
+            main_model=self.model,
+            fnames=fnames,
+            auto_lint=auto_lint,
+            auto_test=auto_test,
+            lint_cmds={"python": lint_cmd},
+            test_cmd=test_cmd,
+            io=io,
+        )
+
+        for test_file in test_files:
+            if fnames[0][8:-4] in test_file:
+                for i in range(2): # try to fix errrors in a file twice
+                    test_cmd = f"python -m commit0 test {repo_name} {test_file} --branch commit0 --commit0-config-file ../../.commit0.yaml"
+                    # string of pytest output
+                    test_errors = coder.commands.cmd_test(test_cmd)
+                    # raise RuntimeError(test_errors)
+                    
+                    # test output for each test case
+                    header_pattern = r"_{4,} (\w+\.\w+) _{4,}"
+                    split_sections = re.split(header_pattern, test_errors)
+                    test_output_list = [split_sections[i] + split_sections[i + 1] for i in range(1, len(header_pattern) - 1, 2)
+    ]   
+
+                    for test_out in test_output_list:
+                        if "FAILED" not in test_out and "FFF" not in test_out:
+                            coder.run(f"Modify or redo the functions just implemented in the file {fnames} " +
+                                    f"to resolve the following failed unit test for your " +
+                                    f"implementation. The unit test output is: \n {test_out}\n\n" +
+                                    f"If the failed unit test is not relevant to the functions in the files: {fnames}, then ignore this command and do nothing. Do not add any new files to chat." +
+                                    f"The unit test failed is in the file {test_file}.")
 
 
 class ManagerAgent(AiderAgents):
