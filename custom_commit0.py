@@ -50,7 +50,7 @@ def custom_run_agent_team_for_repo(
     """Run Aider for a given repository."""
     # get repo info
     commit0_config = read_commit0_config_file(commit0_config_file)
-
+    
     assert "commit0" in commit0_config["dataset_name"]
     _, repo_name = example["repo"].split("/")
 
@@ -181,25 +181,6 @@ def custom_run_agent_team_for_repo(
 
 
 class DebugAgent(AiderAgents):
-    def __init__(self, max_iteration: int, model_name: str):
-        super().__init__(max_iteration)
-        self.model = Model(model_name)
-        # Check if API key is set for the model
-        if "gpt" in model_name:
-            api_key = os.environ.get("OPENAI_API_KEY", None)
-        elif "claude" in model_name:
-            api_key = os.environ.get("ANTHROPIC_API_KEY", None)
-        elif "gemini" in model_name:
-            api_key = os.environ.get("API_KEY", None)
-        else:
-            raise ValueError(f"Unsupported model: {model_name}")
-
-        if not api_key:
-            raise ValueError(
-                "API Key Error: There is no API key associated with the model for this agent. "
-                "Edit model_name parameter in .agent.yaml, export API key for that model, and try again."
-            )
-        
     def run(
         self,
         message: str,
