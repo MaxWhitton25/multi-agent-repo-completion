@@ -3,6 +3,7 @@ import sys
 import yaml
 import multiprocessing
 import bz2
+import re
 
 import logging
 from agent.run_agent import DirContext, run_eval_after_each_commit
@@ -13,6 +14,7 @@ from git import Repo
 from agent.agent_utils import (
     create_branch,
     get_message,
+    get_tests,
     get_target_edit_files,
     get_changed_files_from_commits,
     update_message_with_dependencies,
@@ -166,7 +168,12 @@ def custom_run_agent_team_for_repo(
                 #TODO: fix the display (right now it just displys one file)
                 
                 #TODO: MAKE THE DEBUG/CODER AGENT IMPLEMENT THE ORIGINAL TASK
-                agent_return = coder_agent.run(implement_message, "", lint_cmd, [file_name], file_log_dir)
+                agent_return = coder_agent.run(implement_message, 
+                                               "", 
+                                               lint_cmd, 
+                                               [file_name], 
+                                               file_log_dir, 
+                                               repo_name=repo_name)
                 
                 #TODO: MAKE THE DEBUG/CODER AGENT DEBUG THE IMPLEMENTATION
 
@@ -192,10 +199,7 @@ class DebugAgent(AiderAgents):
         lint_cmd: str,
         fnames: list[str],
         log_dir: Path,
-        test_first: bool = False,
-        lint_first: bool = False,
-        test_files_all: list[str] = [],
-        repo_name: str = "parsel",
+        repo_name: str,
     ) -> AgentReturn:
         if test_cmd:
             auto_test = True
@@ -226,7 +230,9 @@ class DebugAgent(AiderAgents):
         handle_logging("httpx", log_file)
         handle_logging("backoff", log_file)
 
-        test_files = sorted(list(set([i.split(":")[0] for i in test_files_all])))
+        # FIND ALL TEST FILES
+        test_files_str = get_tests(repo_name, verbose=0)
+        test_files = sorted(list(set([i.split(":")[0] for i in test_files_str])))
 
         io = InputOutput(
             yes=True,
@@ -234,6 +240,7 @@ class DebugAgent(AiderAgents):
             chat_history_file=chat_history_file,
         )
 
+        # INNITIALIIZE AIDER
         coder = Coder.create(
             main_model=self.model,
             fnames=fnames,
@@ -244,9 +251,13 @@ class DebugAgent(AiderAgents):
             io=io,
         )
 
+        # TODO: IMPLEMENTATION CODE
+        coder.run(implement_message)
+
+        # DEBUGGING CODE
         for test_file in test_files:
             if fnames[0][8:-4] in test_file:
-                for i in range(2): # try to fix errrors in a file twice
+                for _ in range(2): # try to fix errrors in a file twice
                     test_cmd = f"python -m commit0 test {repo_name} {test_file} --branch commit0 --commit0-config-file ../../.commit0.yaml"
                     # string of pytest output
                     test_errors = coder.commands.cmd_test(test_cmd)
@@ -255,8 +266,7 @@ class DebugAgent(AiderAgents):
                     # test output for each test case
                     header_pattern = r"_{4,} (\w+\.\w+) _{4,}"
                     split_sections = re.split(header_pattern, test_errors)
-                    test_output_list = [split_sections[i] + split_sections[i + 1] for i in range(1, len(header_pattern) - 1, 2)
-    ]   
+                    test_output_list = [split_sections[i] + split_sections[i + 1] for i in range(1, len(header_pattern) - 1, 2)]   
 
                     for test_out in test_output_list:
                         if "FAILED" not in test_out and "FFF" not in test_out:
