@@ -197,13 +197,13 @@ class DebugAgent(AiderAgents):
     def run(
         self,
         implement_message: str,
-        test_cmd: str,
+        test_cmd_second_half: str,
         lint_cmd: str,
         fnames: list[str],
         log_dir: Path,
         repo_name: str,
     ) -> AgentReturn:
-        if test_cmd:
+        if test_cmd_second_half:
             auto_test = True
         else:
             auto_test = False
@@ -247,9 +247,9 @@ class DebugAgent(AiderAgents):
             main_model=self.model,
             fnames=fnames,
             auto_lint=auto_lint,
-            auto_test=auto_test,
+            #auto_test=auto_test, #manually test for now (since the test_cmd will change for each file)
             lint_cmds={"python": lint_cmd},
-            test_cmd=test_cmd,
+            #test_cmd=test_cmd,
             io=io,
         )
 
@@ -260,9 +260,8 @@ class DebugAgent(AiderAgents):
         for test_file in test_files:
             if fnames[0][8:-4] in test_file:
                 for _ in range(2): # try to fix errrors in a file twice
-                    test_cmd = f"python -m commit0 test {repo_name} {test_file} " + test_cmd
-                    
-                    raise RuntimeError(test_cmd)
+                                
+                    test_cmd = f"python -m commit0 test {repo_name} {test_file} " + test_cmd_second_half
                     # string of pytest output
                     test_errors = coder.commands.cmd_test(test_cmd)
                     # raise RuntimeError(test_errors)
@@ -280,6 +279,15 @@ class DebugAgent(AiderAgents):
                                     f"implementation. The unit test output is: \n {test_out}\n\n" +
                                     f"If the failed unit test is not relevant to the functions in the files: {fnames}, then ignore this command and do nothing. Do not add any new files to chat." +
                                     f"The unit test failed is in the file {test_file}.")
+                            
+        
+        sys.stdout.close()
+        sys.stderr.close()
+        # Restore original stdout and stderr
+        sys.stdout = sys.__stdout__
+        sys.stderr = sys.__stderr__
+
+        return AiderReturn(log_file)
 
 
 class ManagerAgent(AiderAgents):
