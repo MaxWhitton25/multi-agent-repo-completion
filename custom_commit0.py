@@ -166,7 +166,7 @@ def custom_run_agent_team_for_repo(
                 implement_message = f"Complete the following task, implementing the relevant incomplete function(s) (i.e., those with pass statements): \n{description}"
                 #TODO: fix the display (right now it just displys one file)
                 
-                second_half_of_test_cmd = f"--branch {branch} --commit0-config-file {commit0_config_file}"
+                second_half_of_test_cmd = f"--branch {branch} --commit0-config-file {commit0_config_file} --timeout 100"
 
                 
                 #TODO: MAKE THE DEBUG/CODER AGENT IMPLEMENT THE ORIGINAL TASK
@@ -261,6 +261,8 @@ class DebugAgent(AiderAgents):
             if fnames[0][8:-4] in test_file:
                 for _ in range(2): # try to fix errrors in a file twice
                     test_cmd = f"python -m commit0 test {repo_name} {test_file} " + test_cmd
+                    
+                    raise RuntimeError(test_cmd)
                     # string of pytest output
                     test_errors = coder.commands.cmd_test(test_cmd)
                     # raise RuntimeError(test_errors)
