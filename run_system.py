@@ -10,9 +10,9 @@ from commit0.harness.constants import RUN_AGENT_LOG_DIR
 def get_args():
   parser = argparse.ArgumentParser()
   parser.add_argument("--split", type=str, default='parsel', help="The split of commit0 to implement and run unit test cases with.")
-  #parser.add_argument("--persistence", type=int, default=1)
   parser.add_argument("--branch", default="commit0")
   parser.add_argument("--model-name", default="gpt-4o-mini", help="Model to use with commit0 agent.")
+  parser.add_argumetn("--setup", type=bool, default=False)
 
   return parser.parse_args()
 
@@ -32,9 +32,10 @@ if __name__ == "__main__":
   load_dotenv() # for the API key (i.e. OpenAI, Claude Anthropic)
 
   ## SETUP commit0 & set up an agent
-  subprocess.run(["commit0", "setup", args.split])
-  # subprocess.run(["agent", "config", "--model-name", args.model_name, "aider"])
- 
+  if(args.setup):
+    subprocess.run(["commit0", "setup", args.split])
+    subprocess.run(["agent", "config", "--model-name", args.model_name, "aider"])
+  
   # try running the code!
   agent_run(args)
 
