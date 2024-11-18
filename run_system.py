@@ -12,7 +12,7 @@ def get_args():
   parser.add_argument("--split", type=str, default='parsel', help="The split of commit0 to implement and run unit test cases with.")
   parser.add_argument("--branch", default="commit0")
   parser.add_argument("--model-name", default="gpt-4o-mini", help="Model to use with commit0 agent.")
-  parser.add_argumetn("--setup", type=bool, default=False)
+  parser.add_argument("--setup", type=bool, default=False)
 
   return parser.parse_args()
 
