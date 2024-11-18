@@ -134,7 +134,7 @@ def custom_run_agent_team_for_repo(
     PLAN_END
     
     Remember that you must modify all of the target edit files: {target_edit_files}
-    The plan does not neccessarily need to edit the whole file in one step, and it may be more granular as you see fit. Additionally, you should look at the file 'spec.pdf' for more information on the project requirements and specifications.
+    The plan does not neccessarily need to edit the whole file in one step, and it may be more granular as you see fit. Keep in mind that the order in which the files/functions are implemented are very important; make sure that no functions' dependencies are being implemented before the function itself. You should look at the file 'spec.pdf' for more information on the project requirements and specifications.
     """
 
     with DirContext(repo_path):
@@ -255,29 +255,36 @@ class DebugAgent(AiderAgents):
 
         # TODO: IMPLEMENTATION CODE
         coder.run(implement_message)
-
+        
         # DEBUGGING CODE
         for test_file in test_files:
-            if fnames[0][8:-4] in test_file:
+            
+            # Get the base name (e.g., "tensor_data.py")
+            base_name = os.path.basename(fnames[0])
+
+            # Split the file name and extension
+            file_name, _ = os.path.splitext(base_name)
+            
+            if file_name in test_file:
                 for _ in range(2): # try to fix errrors in a file twice
                                 
                     test_cmd = f"python -m commit0 test {repo_name} {test_file} " + test_cmd_second_half
                     # string of pytest output
                     test_errors = coder.commands.cmd_test(test_cmd)
-                    # raise RuntimeError(test_errors)
                     
                     # test output for each test case
                     header_pattern = r"_{4,} .+ _{4,}"
                     split_sections = re.split(header_pattern, test_errors)        
                     
-                    test_output_list = [split_sections[i] + split_sections[i + 1] for i in range(1, len(split_sections) - 1, 2)]   
+                    #test_output_list = [split_sections[i] + split_sections[i + 1] for i in range(1, len(split_sections) - 1, 2)]   
+                    
 
-                    for test_out in test_output_list:
-                        if "FAILED" not in test_out and "FFF" not in test_out:
+                    for test_out in split_sections[1:]:
+                        if True:# if "FAILED" not in test_out and "FFF" not in test_out:
                             coder.run(f"Modify or redo the functions just implemented in the file {fnames} " +
                                     f"to resolve the following failed unit test for your " +
                                     f"implementation. The unit test output is: \n {test_out}\n\n" +
-                                    f"If the failed unit test is not relevant to the functions in the files: {fnames}, then ignore this command and do nothing. Do not add any new files to chat." +
+                                    # f"If the failed unit test is not relevant to the functions in the files: {fnames}, then ignore this command and do nothing. Do not add any new files to chat." +
                                     f"The unit test failed is in the file {test_file}.")
                             
         
