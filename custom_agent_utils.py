@@ -1,4 +1,8 @@
 import re 
+import json
+import subprocess
+from commit0.harness.utils import get_hash_string
+from commit0.harness.constants import RUN_PYTEST_LOG_DIR
 
 def parse_tasks(text: str) -> list[tuple[str, str]]:
     """Parse the tasks from the manager output."""
@@ -24,3 +28,28 @@ def parse_tasks(text: str) -> list[tuple[str, str]]:
             tasks.append((file_name, description))
 
     return tasks
+
+def get_test_results_json(repo_name: str, branch: str, commit0_config_file: str) -> dict:
+    # Assuming the test directory is named "tests"
+    test_ids = "tests"
+    
+    command = [
+        "python", "-m", "commit0", "test", repo_name, test_ids, "--branch", branch, "--commit0-config-file", commit0_config_file, "--timeout", "100"
+    ]
+    
+    hashed_test_ids = get_hash_string(test_ids)
+    # set up logging
+    log_dir = RUN_PYTEST_LOG_DIR / repo_name / branch / hashed_test_ids
+    report_file = log_dir / "report.json"
+    
+    try: 
+        subprocess.run(command, check=True)
+    # Called when any pytest tests fail
+    except subprocess.CalledProcessError as e:
+        pass
+    
+    try:
+        with open(report_file, "r") as file:
+            return json.load(file)
+    except FileNotFoundError:
+        raise Exception(f"Test report file not found: {report_file}")

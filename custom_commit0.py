@@ -33,7 +33,7 @@ from pathlib import Path
 from datetime import datetime
 from agent.display import TerminalDisplay
 
-from custom_agent_utils import parse_tasks
+from custom_agent_utils import parse_tasks, get_test_results_json
 
 ### VERSION OF CUSTOM_RUN_AGENT_FOR_REPO which is up to date with git, not pip (11/12)
 def custom_run_agent_team_for_repo(
@@ -122,6 +122,9 @@ def custom_run_agent_team_for_repo(
     agent_config_log_file = experiment_log_dir / ".agent.yaml"
     with open(agent_config_log_file, "w") as agent_config_file:
         yaml.dump(agent_config, agent_config_file)
+        
+    test_results = get_test_results_json(repo_name, branch, commit0_config_file)
+    raise RuntimeError(test_results)
         
     manager_message = f"""You are a manager in charge of writing a plan to complete the implementations for all functions (i.e., those with pass statements) and pass the unit tests. Write a plan of attack to implement the entire repo, keeping in mind the most effective order in which tasks should be implemented. Please output the plan in the format of a list of numbered steps. Each step should specify a file to edit and a high-level description of the change to make. Note that we only need to edit the files that contain functions with pass statements, ie. those in the current context. Give me ONLY the plan, with no extraneous text.
     
