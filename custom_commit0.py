@@ -4,7 +4,6 @@ import yaml
 import multiprocessing
 import bz2
 import re
-
 import logging
 from agent.run_agent import DirContext, run_eval_after_each_commit
 from aider.io import InputOutput
@@ -33,7 +32,7 @@ from pathlib import Path
 from datetime import datetime
 from agent.display import TerminalDisplay
 
-from custom_agent_utils import parse_tasks
+from custom_agent_utils import *
 
 ### VERSION OF CUSTOM_RUN_AGENT_FOR_REPO which is up to date with git, not pip (11/12)
 def custom_run_agent_team_for_repo(
@@ -52,13 +51,10 @@ def custom_run_agent_team_for_repo(
     commit0_config = read_commit0_config_file(commit0_config_file)
     
     assert "commit0" in commit0_config["dataset_name"]
-    _, repo_name = example["repo"].split("/")
-
+    repo_name = example["repo"].split("/")[-1]
+    
     # before starting, display all information to terminal
     update_queue.put(("start_repo", (repo_name, 0)))
-
-    # repo_name = repo_name.lower()
-    # repo_name = repo_name.replace(".", "-")
 
     repo_path = os.path.join(repo_base_dir, repo_name)
     repo_path = os.path.abspath(repo_path)
@@ -101,12 +97,12 @@ def custom_run_agent_team_for_repo(
         agent_config.use_topo_sort_dependencies,
     )
 
-    lint_files = get_changed_files_from_commits(
-        local_repo, "HEAD", example["base_commit"]
-    )
-    # Call the commit0 get-tests command to retrieve test files
-    test_files_str = get_tests(repo_name, verbose=0)
-    test_files = sorted(list(set([i.split(":")[0] for i in test_files_str])))
+    # lint_files = get_changed_files_from_commits(
+    #     local_repo, "HEAD", example["base_commit"]
+    # )
+    # # Call the commit0 get-tests command to retrieve test files
+    # test_files_str = get_tests(repo_name, verbose=0)
+    # test_files = sorted(list(set([i.split(":")[0] for i in test_files_str])))
 
     # prepare the log dir
     experiment_log_dir = (
@@ -116,6 +112,32 @@ def custom_run_agent_team_for_repo(
         / datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     )
     experiment_log_dir.mkdir(parents=True, exist_ok=True)
+
+    """
+    START revert code
+    """
+    # Initialize baseline commit
+    baseline_commit = local_repo.head.commit.hexsha
+
+    # Run initial evaluation to get baseline performance
+    initial_eval_results = run_eval_after_each_commit(
+        branch, backend, commit0_config_file
+    )
+    
+    # Search for the target repository line
+    pattern = fr"^{repo_name},[^,]+,(\d+)/(\d+)"
+    match = re.search(pattern, initial_eval_results, re.MULTILINE)
+
+    if match:
+        initial_num_passed_tests = int(match.group(1))
+        total_tests = int(match.group(2))
+    else:
+        raise RuntimeError(f"Searching for eval results didn't work {initial_eval_results}")
+
+    previous_results = {'num_passed': initial_num_passed_tests, 'num_tests': total_tests}
+    """
+    END revert code
+    """
 
     eval_results = {}
     # write agent_config to .agent.yaml in the log_dir for record
@@ -164,20 +186,64 @@ def custom_run_agent_team_for_repo(
                 update_queue.put(("set_current_file", (repo_name, file_name)))
                 
                 implement_message = f"Complete the following task, implementing the relevant incomplete function(s) (i.e., those with pass statements): \n{description}"
-                #TODO: fix the display (right now it just displys one file)
+                #TODO: fix the display (right now it just displays one file)
                 
                 second_half_of_test_cmd = f"--branch {branch} --commit0-config-file {commit0_config_file} --timeout 100"
+                
+                # MAKE THE DEBUG/CODER AGENT IMPLEMENT THE ORIGINAL TASK
+                # AND REVERT n times
+                n = 3
+                for _ in range(n):
+                    agent_return = coder_agent.run(implement_message, 
+                        second_half_of_test_cmd, 
+                        lint_cmd, 
+                        [file_name], 
+                        file_log_dir, 
+                        repo_name=repo_name)
+                            
+                    """
+                    START revert code
+                    """
+                    # Run tests and check performance
+                    current_eval_results = run_eval_after_each_commit(
+                        branch, backend, commit0_config_file
+                    )
 
-                
-                #TODO: MAKE THE DEBUG/CODER AGENT IMPLEMENT THE ORIGINAL TASK
-                agent_return = coder_agent.run(implement_message, 
-                                               second_half_of_test_cmd, 
-                                               lint_cmd, 
-                                               [file_name], 
-                                               file_log_dir, 
-                                               repo_name=repo_name)
-                
-                #TODO: MAKE THE DEBUG/CODER AGENT DEBUG THE IMPLEMENTATION
+                    # Search for the target repository line
+                    pattern = fr"^{repo_name},[^,]+,(\d+)/(\d+)"
+                    match = re.search(pattern, current_eval_results, re.MULTILINE)
+
+                    if match:
+                        current_num_passed_tests = int(match.group(1))
+                        total_tests = int(match.group(2))
+                    else:
+                        raise RuntimeError(f"Searching for eval results didn't work {current_eval_results}")
+                    current_results = {'num_passed': current_num_passed_tests, 'num_tests': total_tests}
+
+                    performance_improved = check_performance_improved(
+                        previous_results, current_results
+                    )
+
+                    revert_info = ""
+                    if performance_improved:
+                        # Keep changes
+                        baseline_commit = local_repo.head.commit.hexsha
+                        revert_info += f"No revert, current hash {baseline_commit}"
+                        break # don't try implementing again if don't need to revert
+                    else:
+                        # Revert changes
+                        revert_info += f"Reverted to {baseline_commit}"
+                        revert_to_commit(local_repo, baseline_commit)
+                    previous_results = current_results
+
+                    ## LOG REVERT UPDATES
+                    with open(experiment_log_dir / "revert_log_file", "a+") as f:
+                        f.write(revert_info+"\n")
+                        json.dump(current_results, f)
+                        f.write("\n\n")
+                    """
+                    END revert code
+                    """
 
                 update_queue.put(
                     (
@@ -201,7 +267,7 @@ class DebugAgent(AiderAgents):
         lint_cmd: str,
         fnames: list[str],
         log_dir: Path,
-        repo_name: str,
+        repo_name: str
     ) -> AgentReturn:
         if test_cmd_second_half:
             auto_test = True
@@ -253,7 +319,7 @@ class DebugAgent(AiderAgents):
             io=io,
         )
 
-        # TODO: IMPLEMENTATION CODE
+        # IMPLEMENTATION CODE
         coder.run(implement_message)
         
         # DEBUGGING CODE
@@ -286,7 +352,7 @@ class DebugAgent(AiderAgents):
                                     f"implementation. The unit test output is: \n {test_out}\n\n" +
                                     # f"If the failed unit test is not relevant to the functions in the files: {fnames}, then ignore this command and do nothing. Do not add any new files to chat." +
                                     f"The unit test failed is in the file {test_file}.")
-                            
+                                        
         
         sys.stdout.close()
         sys.stderr.close()
@@ -357,80 +423,3 @@ class ManagerAgent(AiderAgents):
 
         return AiderReturn(log_file)
 
-# class RollbackAgents(AiderAgents):
-#     def run(
-#         self,
-#         message: str,
-#         test_cmd: str,
-#         lint_cmd: str,
-#         fnames: list[str],
-#         log_dir: Path,
-#         test_first: bool = False,
-#         lint_first: bool = False,
-#     ) -> AgentReturn:
-#         """Start aider agent"""
-#         if test_cmd:
-#             auto_test = True
-#         else:
-#             auto_test = False
-#         if lint_cmd:
-#             auto_lint = True
-#         else:
-#             auto_lint = False
-#         log_dir = log_dir.resolve()
-#         log_dir.mkdir(parents=True, exist_ok=True)
-#         input_history_file = log_dir / ".aider.input.history"
-#         chat_history_file = log_dir / ".aider.chat.history.md"
-
-#         # Set up logging
-#         log_file = log_dir / "aider.log"
-#         logging.basicConfig(
-#             filename=log_file,
-#             level=logging.INFO,
-#             format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-#         )
-
-#         # Redirect print statements to the log file
-#         sys.stdout = open(log_file, "a")
-#         sys.stderr = open(log_file, "a")
-
-#         # Configure httpx and backoff logging
-#         handle_logging("httpx", log_file)
-#         handle_logging("backoff", log_file)
-
-#         io = InputOutput(
-#             yes=True,
-#             input_history_file=input_history_file,
-#             chat_history_file=chat_history_file,
-#         )
-#         coder = RollbackCoder.create(
-#             main_model=self.model,
-#             fnames=fnames,
-#             auto_lint=auto_lint,
-#             auto_test=auto_test,
-#             lint_cmds={"python": lint_cmd},
-#             test_cmd=test_cmd,
-#             io=io,
-#         )
-#         coder.max_reflections = self.max_iteration
-#         coder.stream = True
-
-#         # Run the agent
-#         if test_first:
-#             test_errors = coder.commands.cmd_test(test_cmd)
-#             if test_errors:
-#                 coder.run(test_errors)
-#         elif lint_first:
-#             coder.commands.cmd_lint(fnames=fnames)
-#         else:
-#             coder.run(message)
-
-#         # Close redirected stdout and stderr
-#         sys.stdout.close()
-#         sys.stderr.close()
-#         # Restore original stdout and stderr
-#         sys.stdout = sys.__stdout__
-#         sys.stderr = sys.__stderr__
-
-#         return AgentReturn(log_file)
-    

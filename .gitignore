@@ -169,3 +169,4 @@ hydra_outputs/
 .agent*
 docs/analysis*.md
 processing_summary*.json
+.DS_Store
