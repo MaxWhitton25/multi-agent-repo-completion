@@ -19,6 +19,8 @@ from agent.agent_utils import (
     update_message_with_dependencies,
     get_lint_cmd,
     read_yaml_config,
+    extract_function_stubs,
+    get_dir_info,
 )
 from agent.agents import AiderAgents, AgentReturn, AiderReturn, handle_logging
 from aider.coders import Coder
@@ -33,7 +35,9 @@ from pathlib import Path
 from datetime import datetime
 from agent.display import TerminalDisplay
 
-from custom_agent_utils import parse_tasks
+from custom_agent_utils import parse_tasks, get_classes_from_file
+from openai import OpenAI
+
 
 ### VERSION OF CUSTOM_RUN_AGENT_FOR_REPO which is up to date with git, not pip (11/12)
 def custom_run_agent_team_for_repo(
@@ -100,6 +104,37 @@ def custom_run_agent_team_for_repo(
         example["reference_commit"],
         agent_config.use_topo_sort_dependencies,
     )
+
+    ### ✅ NEW CODE START
+
+    dir_info = get_dir_info(Path(repo_path))
+    with open("logging.txt", "w") as f:
+        f.write("")
+
+    prompt = f"Directory structure: \n{dir_info}. \n\nFile wise details are:\n"
+
+    for file in target_edit_files:
+        file_path = os.path.join(repo_path, file)
+
+        #functions = extract_function_stubs(file_path)
+        classes = get_classes_from_file(file_path)
+        with open("logging.txt", "a") as f:
+            f.write(str(classes))
+
+        if classes:
+            prompt += f"The classes in {file} are {str(classes)}. \n\n"
+        else:
+            functions = extract_function_stubs(file_path)
+            prompt += f"{file} has no classes in it, the functions it has are {functions}. \n\n"
+        
+    with open("logging.txt", "a") as f:
+        f.write(f"{repo_name}\n")
+        f.write(prompt)
+        f.write("\n\n")
+
+    context_info_as_str = prompt        
+
+    ### ✅ NEW CODE END
 
     lint_files = get_changed_files_from_commits(
         local_repo, "HEAD", example["base_commit"]
@@ -175,7 +210,8 @@ def custom_run_agent_team_for_repo(
                                                lint_cmd, 
                                                [file_name], 
                                                file_log_dir, 
-                                               repo_name=repo_name)
+                                               repo_name=repo_name,
+                                               context_info_as_str=context_info_as_str)
                 
                 #TODO: MAKE THE DEBUG/CODER AGENT DEBUG THE IMPLEMENTATION
 
@@ -194,6 +230,30 @@ def custom_run_agent_team_for_repo(
 
 
 class DebugAgent(AiderAgents):
+    def check_for_missing_context(test_output, current_context, context_info_as_str, repo_name):
+        client = OpenAI()
+        completion = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "You create short prompts for another coder LLM."},
+                {
+                    "role": "user",
+                    "content": f"The coder agent is trying to implement {repo_name} from scratch.\n"+
+                    f"The coder agent has access to only the following files: {current_context}.\n"+
+                    f"Based on the following file system and test output information "+
+                    f"diagnose if the error is caused by the coder not having access to the right files"+
+                    f"Suggest not more than 2 files to add, your output should be"+
+                    f"a prompt of less than 50 words of the form "+
+                    f"'Add file <filename.py> as context and try rewriting the code'.\n\n"
+                    f"Info about the file system: \n{context_info_as_str}"+
+                    f"Error output: \n{test_output}"
+                }
+            ]
+        )
+
+        return completion.choices[0].message
+
+
     def run(
         self,
         implement_message: str,
@@ -202,6 +262,7 @@ class DebugAgent(AiderAgents):
         fnames: list[str],
         log_dir: Path,
         repo_name: str,
+        context_info_as_str: str,
     ) -> AgentReturn:
         if test_cmd_second_half:
             auto_test = True

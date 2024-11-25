@@ -1,4 +1,5 @@
 import re 
+import ast
 
 def parse_tasks(text: str) -> list[tuple[str, str]]:
     """Parse the tasks from the manager output."""
@@ -24,3 +25,16 @@ def parse_tasks(text: str) -> list[tuple[str, str]]:
             tasks.append((file_name, description))
 
     return tasks
+
+
+def get_classes_from_file(file_path):
+    try:
+        with open(file_path, "r") as file:
+            tree = ast.parse(file.read())
+        
+        # Get all class definitions from the AST
+        class_names = [node.name for node in ast.walk(tree) if isinstance(node, ast.ClassDef)]
+        
+        return class_names if class_names else None
+    except Exception as e:
+        return f"Error: {e}"

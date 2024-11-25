@@ -1,0 +1,59 @@
+['XPathExpr', 'TranslatorProtocol', 'TranslatorMixin', 'GenericTranslator', 'HTMLTranslator']NoneNone['CannotRemoveElementWithoutRoot', 'CannotRemoveElementWithoutParent', 'CannotDropElementWithoutParent', 'SafeXMLParser', 'CTGroupValue', 'SelectorList', 'Selector']parsel
+Directory structure: 
+├── pylintrc
+├── spec.pdf.bz2
+├── README.rst
+├── parsel
+│   ├── py.typed
+│   ├── __init__.py
+│   ├── xpathfuncs.py
+│   ├── csstranslator.py
+│   ├── selector.py
+│   └── utils.py
+├── tests
+│   ├── test_selector_jmespath.py
+│   ├── typing
+│   │   └── selector.py
+│   ├── test_utils.py
+│   ├── test_selector_csstranslator.py
+│   ├── test_selector.py
+│   ├── test_xpathfuncs.py
+│   ├── xml_attacks
+│   │   └── billion_laughs.xml
+│   ├── test_xml_attacks.py
+│   └── requirements.txt
+├── docs
+│   ├── make.bat
+│   ├── Makefile
+│   ├── history.rst
+│   ├── usage.rst
+│   ├── conftest.py
+│   ├── _static
+│   │   ├── selectors-sample1.html
+│   │   ├── multiroot.html
+│   │   └── python-insider.xml
+│   ├── parsel.rst
+│   ├── conf.py
+│   ├── index.rst
+│   ├── installation.rst
+│   └── requirements.txt
+├── pytest.ini
+├── setup.py
+├── setup.cfg
+├── NEWS
+├── release.rst
+├── LICENSE
+├── MANIFEST.in
+└── tox.ini. 
+
+File wise details are:
+The classes in parsel/csstranslator.py are ['XPathExpr', 'TranslatorProtocol', 'TranslatorMixin', 'GenericTranslator', 'HTMLTranslator']. 
+
+parsel/utils.py has no classes in it, the functions it has are ['def flatten(x: Iterable[Any]) -> List[Any]: ...', 'def iflatten(x: Iterable[Any]) -> Iterator[Any]: ...', 'def _is_listlike(x: Any) -> bool: ...', 'def extract_regex(regex: Union[str, Pattern[str]], text: str, replace_entities: bool=True) -> List[str]: ...', "def shorten(text: str, width: int, suffix: str='...') -> str: ..."]. 
+
+parsel/xpathfuncs.py has no classes in it, the functions it has are ['def set_xpathfunc(fname: str, func: Optional[Callable]) -> None: ...', 'def has_class(context: Any, *classes: str) -> bool: ...']. 
+
+The classes in parsel/selector.py are ['CannotRemoveElementWithoutRoot', 'CannotRemoveElementWithoutParent', 'CannotDropElementWithoutParent', 'SafeXMLParser', 'CTGroupValue', 'SelectorList', 'Selector']. 
+
+
+
