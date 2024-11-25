@@ -34,6 +34,7 @@ from datetime import datetime
 from agent.display import TerminalDisplay
 
 from custom_agent_utils import parse_tasks, get_test_results_json
+from map import get_test_mapping
 
 ### VERSION OF CUSTOM_RUN_AGENT_FOR_REPO which is up to date with git, not pip (11/12)
 def custom_run_agent_team_for_repo(
@@ -62,7 +63,7 @@ def custom_run_agent_team_for_repo(
 
     repo_path = os.path.join(repo_base_dir, repo_name)
     repo_path = os.path.abspath(repo_path)
-
+    
     try:
         local_repo = Repo(repo_path)
     except Exception:
@@ -70,8 +71,9 @@ def custom_run_agent_team_for_repo(
             f"{repo_path} is not a git repo. Check if base_dir is correctly specified."
         )
         
+    test_mapping = get_test_mapping(Path(repo_path))
     manager_agent = ManagerAgent(1, agent_config.model_name)
-    coder_agent = DebugAgent(agent_config.max_iteration, agent_config.model_name)
+    coder_agent = DebugAgent(agent_config.max_iteration, agent_config.model_name, test_mapping)
 
     # Check if there are changes in the current branch
     if local_repo.is_dirty():
@@ -122,10 +124,7 @@ def custom_run_agent_team_for_repo(
     agent_config_log_file = experiment_log_dir / ".agent.yaml"
     with open(agent_config_log_file, "w") as agent_config_file:
         yaml.dump(agent_config, agent_config_file)
-        
-    test_results = get_test_results_json(repo_name, branch, commit0_config_file)
-    raise RuntimeError(test_results)
-        
+                
     manager_message = f"""You are a manager in charge of writing a plan to complete the implementations for all functions (i.e., those with pass statements) and pass the unit tests. Write a plan of attack to implement the entire repo, keeping in mind the most effective order in which tasks should be implemented. Please output the plan in the format of a list of numbered steps. Each step should specify a file to edit and a high-level description of the change to make. Note that we only need to edit the files that contain functions with pass statements, ie. those in the current context. Give me ONLY the plan, with no extraneous text.
     
     You MUST precede the plan with the keyword PLAN_START, and end it with the keyword PLAN_END. You MUST follow the formatting of the example plan below, with a number preceding each step on a new line, and one file name followed by a colon and a detailed description of the change to make:
@@ -145,6 +144,31 @@ def custom_run_agent_team_for_repo(
             raise ValueError("Invalid input")
 
         else:
+            
+            message = get_message(agent_config, repo_path, test_files=test_files)
+
+            update_queue.put(("start_repo", (repo_name, len(target_edit_files))))
+            for f in target_edit_files:
+                update_queue.put(("set_current_file", (repo_name, f)))
+                if agent_config.add_import_module_to_context:
+                    dependencies = import_dependencies.get(f, [])
+                    message = update_message_with_dependencies(message, dependencies)
+                    
+                file_name = f.replace(".py", "").replace("/", "__")
+                file_log_dir = experiment_log_dir / file_name
+                lint_cmd = get_lint_cmd(
+                    repo_name, agent_config.use_lint_info, commit0_config_file
+                )
+                
+                agent_return = coder_agent.run(message, lint_cmd, [f], file_log_dir, repo_name, branch, commit0_config_file)
+                update_queue.put(
+                    (
+                        "update_money_display",
+                        (repo_name, file_name, agent_return.last_cost),
+                    )
+                )
+            
+            '''
             file_name = "all"
             file_log_dir = experiment_log_dir / file_name
             lint_cmd = get_lint_cmd(repo_name, agent_config.use_lint_info, commit0_config_file)
@@ -187,7 +211,7 @@ def custom_run_agent_team_for_repo(
                         "update_money_display",
                         (repo_name, file_name, agent_return.last_cost),
                     )
-                )
+                ) '''
                 
     if agent_config.record_test_for_each_commit:
         with open(experiment_log_dir / "eval_results.json", "w") as f:
@@ -197,19 +221,69 @@ def custom_run_agent_team_for_repo(
 
 
 class DebugAgent(AiderAgents):
+    
+    def __init__(self, max_iteration: int, model_name: str, test_mapping: dict):
+        super().__init__(max_iteration, model_name)
+        self.test_mapping = test_mapping
+        
+    def are_equivalent_errors(self, e1: dict, e2: dict) -> bool:
+        """Compares two error messages, ignoring hex addresses like '0x...' regardless of context."""
+        
+        hex_pattern = r"0x[0-9a-fA-F]+"
+        
+        s1 = e1["call"]["crash"]["message"]
+        s2 = e2["call"]["crash"]["message"]
+        
+        # Replace all hex addresses with placeholder
+        clean_s1 = re.sub(hex_pattern, "<hex>", s1)
+        clean_s2 = re.sub(hex_pattern, "<hex>", s2)
+        
+        return clean_s1 == clean_s2
+    
+    def find_unique_errors_for_file(self, test_results: dict, file: str) -> list[str]:
+        """Find unique errors in the current test results for the given file."""
+        
+        related_errors = []
+        
+        # Find the stemmed name of the file (ex. src/file.py -> file)
+        file_stem = Path(file).stem
+        
+        for curr_test in test_results["tests"]:
+            if curr_test["outcome"] != "passed":
+                # Remove things in brackets (ex. tests/test_resources.py::test_initial_store_capacity[Store]) to get the test case name
+                test_case = re.sub(r"\[.*?\]", "", curr_test["nodeid"])
+                file_to_functions = self.test_mapping[test_case]
+                
+                # Check if the file name is in the test case name
+                if file_stem in test_case:
+                    related_errors.append(curr_test)
+                    continue
+                
+                # Check if the file name is in the mapping
+                for test_file, functions in file_to_functions.items():
+                    if test_file in file:
+                        related_errors.append(curr_test)
+                        break
+                            
+        unique_errors = [] 
+        for curr_test in related_errors:
+            if all(
+                not self.are_equivalent_errors(curr_test, unique_error) for unique_error in unique_errors
+                ):
+                unique_errors.append(curr_test)
+                
+        return unique_errors
+    
     def run(
         self,
         implement_message: str,
-        test_cmd_second_half: str,
         lint_cmd: str,
         fnames: list[str],
         log_dir: Path,
         repo_name: str,
+        branch: str,
+        commit0_config_file: str,
     ) -> AgentReturn:
-        if test_cmd_second_half:
-            auto_test = True
-        else:
-            auto_test = False
         if lint_cmd:
             auto_lint = True
         else:
@@ -235,10 +309,6 @@ class DebugAgent(AiderAgents):
         handle_logging("httpx", log_file)
         handle_logging("backoff", log_file)
 
-        # FIND ALL TEST FILES
-        test_files_str = get_tests(repo_name, verbose=0)
-        test_files = sorted(list(set([i.split(":")[0] for i in test_files_str])))
-
         io = InputOutput(
             yes=True,
             input_history_file=input_history_file,
@@ -256,39 +326,21 @@ class DebugAgent(AiderAgents):
             io=io,
         )
 
-        # TODO: IMPLEMENTATION CODE
+        # IMPLEMENTATION CODE
         coder.run(implement_message)
         
+        test_results = get_test_results_json(repo_name, branch, commit0_config_file)
+        unique_errors = self.find_unique_errors_for_file(test_results, fnames[0])
+                
         # DEBUGGING CODE
-        for test_file in test_files:
+        for error in unique_errors:
             
-            # Get the base name (e.g., "tensor_data.py")
-            base_name = os.path.basename(fnames[0])
-
-            # Split the file name and extension
-            file_name, _ = os.path.splitext(base_name)
-            
-            if file_name in test_file:
-                for _ in range(2): # try to fix errrors in a file twice
-                                
-                    test_cmd = f"python -m commit0 test {repo_name} {test_file} " + test_cmd_second_half
-                    # string of pytest output
-                    test_errors = coder.commands.cmd_test(test_cmd)
-                    
-                    # test output for each test case
-                    header_pattern = r"_{4,} .+ _{4,}"
-                    split_sections = re.split(header_pattern, test_errors)        
-                    
-                    #test_output_list = [split_sections[i] + split_sections[i + 1] for i in range(1, len(split_sections) - 1, 2)]   
-                    
-
-                    for test_out in split_sections[1:]:
-                        if True:# if "FAILED" not in test_out and "FFF" not in test_out:
-                            coder.run(f"Modify or redo the functions just implemented in the file {fnames} " +
-                                    f"to resolve the following failed unit test for your " +
-                                    f"implementation. The unit test output is: \n {test_out}\n\n" +
-                                    # f"If the failed unit test is not relevant to the functions in the files: {fnames}, then ignore this command and do nothing. Do not add any new files to chat." +
-                                    f"The unit test failed is in the file {test_file}.")
+            coder.run(f"Modify or redo the functions just implemented in the file {fnames[0]} " +
+                            f"to resolve the following failed unit test for your " +
+                            f"implementation. The unit test output is: \n {error["call"]["longrepr"]}\n\n" +
+                            # f"If the failed unit test is not relevant to the functions in the files: {fnames}, then ignore this command and do nothing. Do not add any new files to chat." +
+                            f"The traceback of the unit test failed is: \n {error["call"]["traceback"]}\n\n" +
+                            f"The specific unit test failed is {error["nodeid"]}.")
                             
         
         sys.stdout.close()
