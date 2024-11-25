@@ -40,7 +40,7 @@ def check_performance_improved(previous_results: dict, current_results: dict) ->
     """Compare previous and current test results to determine if performance has improved."""
     previous_passed = previous_results.get('num_passed', 0)
     current_passed = current_results.get('num_passed', 0)
-    return current_passed > previous_passed
+    return current_passed >= previous_passed
 
 
 def revert_to_commit(repo: git.Repo, commit_hash: str) -> None:

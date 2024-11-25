@@ -18,6 +18,7 @@ from agent.agent_utils import (
     update_message_with_dependencies,
     get_lint_cmd,
     read_yaml_config,
+    extract_function_stubs
 )
 from agent.agents import AiderAgents, AgentReturn, AiderReturn, handle_logging
 from aider.coders import Coder
@@ -97,12 +98,8 @@ def custom_run_agent_team_for_repo(
         agent_config.use_topo_sort_dependencies,
     )
 
-    # lint_files = get_changed_files_from_commits(
-    #     local_repo, "HEAD", example["base_commit"]
-    # )
-    # # Call the commit0 get-tests command to retrieve test files
-    # test_files_str = get_tests(repo_name, verbose=0)
-    # test_files = sorted(list(set([i.split(":")[0] for i in test_files_str])))
+    # extract_function_stubs(os.path.join(repo_path, "parsel/selector.py"))
+    # raise RuntimeError("trying extract function stubs")
 
     # prepare the log dir
     experiment_log_dir = (
