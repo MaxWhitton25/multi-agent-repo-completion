@@ -244,7 +244,7 @@ class DebugAgent(AiderAgents):
                     f"diagnose if the error is caused by the coder not having access to the right files"+
                     f"Suggest not more than 2 files to add, your output should be"+
                     f"a prompt of less than 50 words of the form "+
-                    f"'Add file <filename.py> as context and try rewriting the code'.\n\n"
+                    f"'Add file <filename.py> and file <filename.py> (read-only) to the chat'.\n\n"
                     f"Info about the file system: \n{context_info_as_str}"+
                     f"Error output: \n{test_output}"
                 }
