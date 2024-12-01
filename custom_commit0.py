@@ -190,57 +190,57 @@ def custom_run_agent_team_for_repo(
                 # MAKE THE DEBUG/CODER AGENT IMPLEMENT THE ORIGINAL TASK
                 # AND REVERT n times
                 n = 3
-                for _ in range(n):
-                    agent_return = coder_agent.run(implement_message, 
-                        second_half_of_test_cmd, 
-                        lint_cmd, 
-                        [file_name], 
-                        file_log_dir, 
-                        repo_name=repo_name)
-                            
-                    """
-                    START revert code
-                    """
-                    # Run tests and check performance
-                    current_eval_results = run_eval_after_each_commit(
-                        branch, backend, commit0_config_file
-                    )
+                # for _ in range(n):
+                agent_return = coder_agent.run(implement_message, 
+                    second_half_of_test_cmd, 
+                    lint_cmd, 
+                    [file_name], 
+                    file_log_dir, 
+                    repo_name=repo_name)
+                        
+                """
+                START revert code
+                """
+                # Run tests and check performance
+                current_eval_results = run_eval_after_each_commit(
+                    branch, backend, commit0_config_file
+                )
 
-                    # Search for the target repository line
-                    pattern = fr"^{repo_name},[^,]+,(\d+)/(\d+)"
-                    match = re.search(pattern, current_eval_results, re.MULTILINE)
+                # Search for the target repository line
+                pattern = fr"^{repo_name},[^,]+,(\d+)/(\d+)"
+                match = re.search(pattern, current_eval_results, re.MULTILINE)
 
-                    if match:
-                        current_num_passed_tests = int(match.group(1))
-                        total_tests = int(match.group(2))
-                    else:
-                        raise RuntimeError(f"Searching for eval results didn't work {current_eval_results}")
-                    current_results = {'num_passed': current_num_passed_tests, 'num_tests': total_tests}
+                if match:
+                    current_num_passed_tests = int(match.group(1))
+                    total_tests = int(match.group(2))
+                else:
+                    raise RuntimeError(f"Searching for eval results didn't work {current_eval_results}")
+                current_results = {'num_passed': current_num_passed_tests, 'num_tests': total_tests}
 
-                    performance_improved = check_performance_improved(
-                        previous_results, current_results
-                    )
+                performance_improved = check_performance_improved(
+                    previous_results, current_results
+                )
 
-                    revert_info = ""
-                    if performance_improved:
-                        # Keep changes
-                        baseline_commit = local_repo.head.commit.hexsha
-                        revert_info += f"No revert, current hash {baseline_commit}"
-                        break # don't try implementing again if don't need to revert
-                    else:
-                        # Revert changes
-                        revert_info += f"Reverted to {baseline_commit}"
-                        revert_to_commit(local_repo, baseline_commit)
-                    previous_results = current_results
+                revert_info = ""
+                if performance_improved:
+                    # Keep changes
+                    baseline_commit = local_repo.head.commit.hexsha
+                    revert_info += f"No revert, current hash {baseline_commit}"
+                    break # don't try implementing again if don't need to revert
+                else:
+                    # Revert changes
+                    revert_info += f"Reverted to {baseline_commit}"
+                    revert_to_commit(local_repo, baseline_commit)
+                previous_results = current_results
 
-                    ## LOG REVERT UPDATES
-                    with open(experiment_log_dir / "revert_log_file", "a+") as f:
-                        f.write(revert_info+"\n")
-                        json.dump(current_results, f)
-                        f.write("\n\n")
-                    """
-                    END revert code
-                    """
+                ## LOG REVERT UPDATES
+                with open(experiment_log_dir / "revert_log_file", "a+") as f:
+                    f.write(revert_info+"\n")
+                    json.dump(current_results, f)
+                    f.write("\n\n")
+                """
+                END revert code
+                """
 
                 update_queue.put(
                     (
