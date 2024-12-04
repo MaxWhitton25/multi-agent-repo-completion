@@ -43,9 +43,12 @@ def get_test_results_json(repo_name: str, branch: str, commit0_config_file: str)
     report_file = log_dir / "report.json"
     
     try: 
-        subprocess.run(command, check=True)
+        subprocess.run(command, capture_output=True, check=True)
     # Called when any pytest tests fail
     except subprocess.CalledProcessError as e:
+        if e.returncode > 1: 
+            #indicates more than just a unit test-level error
+            raise RuntimeError(e.stdout)
         pass
     
     try:

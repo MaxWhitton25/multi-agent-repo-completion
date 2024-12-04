@@ -329,18 +329,29 @@ class DebugAgent(AiderAgents):
         # IMPLEMENTATION CODE
         coder.run(implement_message)
         
-        test_results = get_test_results_json(repo_name, branch, commit0_config_file)
-        unique_errors = self.find_unique_errors_for_file(test_results, fnames[0])
-                
-        # DEBUGGING CODE
-        for error in unique_errors:
+        attempts = 0
+        test_results = None
+        while attempts < self.max_iteration:
+            try:
+                test_results = get_test_results_json(repo_name, branch, commit0_config_file)
+            except RuntimeError as e:
+                coder.run(f"An error occured when running the test command: {e}\n\n" + 
+                        f"Modify or redo the functions just implemented in the file {fnames[0]} " +
+                        f"to resolve the error.")
+                attempts += 1
+        
+        if test_results:
+            unique_errors = self.find_unique_errors_for_file(test_results, fnames[0])      
             
-            coder.run(f"Modify or redo the functions just implemented in the file {fnames[0]} " +
-                            f"to resolve the following failed unit test for your " +
-                            f"implementation. The unit test output is: \n {error["call"]["longrepr"]}\n\n" +
-                            # f"If the failed unit test is not relevant to the functions in the files: {fnames}, then ignore this command and do nothing. Do not add any new files to chat." +
-                            f"The traceback of the unit test failed is: \n {error["call"]["traceback"]}\n\n" +
-                            f"The specific unit test failed is {error["nodeid"]}.")
+            # DEBUGGING CODE
+            for error in unique_errors:
+                
+                coder.run(f"Modify or redo the functions just implemented in the file {fnames[0]} " +
+                                f"to resolve the following failed unit test for your " +
+                                f"implementation. The unit test output is: \n {error["call"]["longrepr"]}\n\n" +
+                                # f"If the failed unit test is not relevant to the functions in the files: {fnames}, then ignore this command and do nothing. Do not add any new files to chat." +
+                                f"The traceback of the unit test failed is: \n {error["call"]["traceback"]}\n\n" +
+                                f"The specific unit test failed is {error["nodeid"]}.")
                             
         
         sys.stdout.close()
