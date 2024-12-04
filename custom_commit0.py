@@ -331,11 +331,11 @@ class DebugAgent(AiderAgents):
         
         attempts = 0
         test_results = None
-        while attempts < self.max_iteration:
+        while attempts < self.max_iteration and not test_results:
             try:
                 test_results = get_test_results_json(repo_name, branch, commit0_config_file)
             except RuntimeError as e:
-                coder.run(f"An error occured when running the test command: {e}\n\n" + 
+                coder.run(f"The following error occured when running the test command: {e}\n\n" + 
                         f"Modify or redo the functions just implemented in the file {fnames[0]} " +
                         f"to resolve the error.")
                 attempts += 1
@@ -352,6 +352,8 @@ class DebugAgent(AiderAgents):
                                 # f"If the failed unit test is not relevant to the functions in the files: {fnames}, then ignore this command and do nothing. Do not add any new files to chat." +
                                 f"The traceback of the unit test failed is: \n {error["call"]["traceback"]}\n\n" +
                                 f"The specific unit test failed is {error["nodeid"]}.")
+                coder.run("/reset")
+                coder.run(f"/add {fnames[0]}")
                             
         
         sys.stdout.close()
