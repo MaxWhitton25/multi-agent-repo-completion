@@ -67,8 +67,8 @@ def custom_run_agent_team_for_repo(
             f"{repo_path} is not a git repo. Check if base_dir is correctly specified."
         )
         
-    manager_agent = ManagerAgent(1, agent_config.model_name)
-    coder_agent = DebugAgent(agent_config.max_iteration, agent_config.model_name)
+    #manager_agent = ManagerAgent(1, agent_config.model_name)
+    coder_agent = CodingAgent(agent_config.max_iteration, agent_config.model_name)
 
     # Check if there are changes in the current branch
     if local_repo.is_dirty():
@@ -131,7 +131,7 @@ def custom_run_agent_team_for_repo(
     else:
         raise RuntimeError(f"Searching for eval results didn't work {initial_eval_results}")
 
-    previous_results = {'num_passed': initial_num_passed_tests, 'num_tests': total_tests}
+    best_results = {'num_passed': initial_num_passed_tests, 'num_tests': total_tests}
     """
     END revert code
     """
@@ -142,19 +142,19 @@ def custom_run_agent_team_for_repo(
     with open(agent_config_log_file, "w") as agent_config_file:
         yaml.dump(agent_config, agent_config_file)
         
-    manager_message = f"""You are a manager in charge of writing a plan to complete the implementations for all functions (i.e., those with pass statements) and pass the unit tests. Write a plan of attack to implement the entire repo, keeping in mind the most effective order in which tasks should be implemented. Please output the plan in the format of a list of numbered steps. Each step should specify a file to edit and a high-level description of the change to make. Note that we only need to edit the files that contain functions with pass statements, ie. those in the current context. Give me ONLY the plan, with no extraneous text.
+    # manager_message = f"""You are a manager in charge of writing a plan to complete the implementations for all functions (i.e., those with pass statements) and pass the unit tests. Write a plan of attack to implement the entire repo, keeping in mind the most effective order in which tasks should be implemented. Please output the plan in the format of a list of numbered steps. Each step should specify a file to edit and a high-level description of the change to make. Note that we only need to edit the files that contain functions with pass statements, ie. those in the current context. Give me ONLY the plan, with no extraneous text.
     
-    You MUST precede the plan with the keyword PLAN_START, and end it with the keyword PLAN_END. You MUST follow the formatting of the example plan below, with a number preceding each step on a new line, and one file name followed by a colon and a detailed description of the change to make:
+    # You MUST precede the plan with the keyword PLAN_START, and end it with the keyword PLAN_END. You MUST follow the formatting of the example plan below, with a number preceding each step on a new line, and one file name followed by a colon and a detailed description of the change to make:
     
-    PLAN_START
-    1.) example_file.py: description of function(s) to implement in example_file.py, including any relevant context or dependencies
-    2.) example_file2.py: description of function(s) to implement in example_file2.py, including any relevant context or dependencies
-    ... 
-    PLAN_END
+    # PLAN_START
+    # 1.) example_file.py: description of function(s) to implement in example_file.py, including any relevant context or dependencies
+    # 2.) example_file2.py: description of function(s) to implement in example_file2.py, including any relevant context or dependencies
+    # ... 
+    # PLAN_END
     
-    Remember that you must modify all of the target edit files: {target_edit_files}
-    The plan does not neccessarily need to edit the whole file in one step, and it may be more granular as you see fit. Keep in mind that the order in which the files/functions are implemented are very important; make sure that no functions' dependencies are being implemented before the function itself. You should look at the file 'spec.pdf' for more information on the project requirements and specifications.
-    """
+    # Remember that you must modify all of the target edit files: {target_edit_files}
+    # The plan does not neccessarily need to edit the whole file in one step, and it may be more granular as you see fit. Keep in mind that the order in which the files/functions are implemented are very important; make sure that no functions' dependencies are being implemented before the function itself. You should look at the file 'spec.pdf' for more information on the project requirements and specifications.
+    # """
 
     with DirContext(repo_path):
         if agent_config is None:
@@ -165,33 +165,37 @@ def custom_run_agent_team_for_repo(
             file_log_dir = experiment_log_dir / file_name
             lint_cmd = get_lint_cmd(repo_name, agent_config.use_lint_info, commit0_config_file)
             
-            agent_return = manager_agent.run(manager_message, target_edit_files, file_log_dir)
+            #agent_return = manager_agent.run(manager_message, target_edit_files, file_log_dir)
             
-            update_queue.put(
-                (
-                    "update_money_display",
-                    (repo_name, file_name, agent_return.last_cost),
-                )
-            )
+            # update_queue.put(
+            #     (
+            #         "update_money_display",
+            #         (repo_name, file_name, agent_return.last_cost),
+            #     )
+            # )
                         
-            with open(agent_return.log_file, 'r', encoding='utf-8') as file:
-                plan = file.read()
+            # with open(agent_return.log_file, 'r', encoding='utf-8') as file:
+            #     plan = file.read()
             
-            tasks = parse_tasks(plan)
+            # tasks = parse_tasks(plan)
             
-            for file_name, description in tasks:
+            i = 0
+            while i < len(target_edit_files):
+                file_name = target_edit_files[i]
+                file_impl = False # indicator var for if a commit implementing this file is kept
                 update_queue.put(("set_current_file", (repo_name, file_name)))
+
+                with open(experiment_log_dir / "revert_log_file.txt", "a+") as f:
+                    f.write(f"IMPLEMENTING {file_name}\n")
                 
-                implement_message = f"Complete the following task, implementing the relevant incomplete function(s) (i.e., those with pass statements): \n{description}"
-                #TODO: fix the display (right now it just displays one file)
-                
+                #implement_message = f"Implement the incomplete functions and classes in {file_name}. There should be no raise NotImplementedErrors left in the file."
                 second_half_of_test_cmd = f"--branch {branch} --commit0-config-file {commit0_config_file} --timeout 100"
                 
                 # MAKE THE DEBUG/CODER AGENT IMPLEMENT THE ORIGINAL TASK
                 # AND REVERT n times
-                n = 3
+                # n = 2
                 # for _ in range(n):
-                agent_return = coder_agent.run(implement_message, 
+                agent_return = coder_agent.run(agent_config.user_prompt, 
                     second_half_of_test_cmd, 
                     lint_cmd, 
                     [file_name], 
@@ -216,27 +220,31 @@ def custom_run_agent_team_for_repo(
                 else:
                     raise RuntimeError(f"Searching for eval results didn't work {current_eval_results}")
                 current_results = {'num_passed': current_num_passed_tests, 'num_tests': total_tests}
-
+        
                 performance_improved = check_performance_improved(
-                    previous_results, current_results
+                    best_results, current_results
                 )
 
                 revert_info = ""
                 if performance_improved:
                     # Keep changes
+                    file_impl = True
                     baseline_commit = local_repo.head.commit.hexsha
-                    revert_info += f"No revert, current hash {baseline_commit}"
-                    break # don't try implementing again if don't need to revert
+                    revert_info += f"\nNo revert, current hash {baseline_commit}"
+                    best_results = current_results
+                    #break # don't try implementing again if don't need to revert
                 else:
                     # Revert changes
-                    revert_info += f"Reverted to {baseline_commit}"
+                    revert_info += f"\nReverted to {baseline_commit}"
                     revert_to_commit(local_repo, baseline_commit)
-                previous_results = current_results
-
-                ## LOG REVERT UPDATES
-                with open(experiment_log_dir / "revert_log_file", "a+") as f:
-                    f.write(revert_info+"\n")
+                
+                ## LOG REVERT UPDATES in revert_log_files
+                with open(experiment_log_dir / "revert_log_file.txt", "a+") as f:
+                    f.write("new results: ")
                     json.dump(current_results, f)
+                    f.write("\nbest results: ")
+                    json.dump(best_results, f)
+                    f.write(revert_info+"\n")
                     f.write("\n\n")
                 """
                 END revert code
@@ -248,6 +256,10 @@ def custom_run_agent_team_for_repo(
                         (repo_name, file_name, agent_return.last_cost),
                     )
                 )
+
+                # move on to next file only if a commit implemting this file is kept
+                if file_impl:
+                    i += 1
                 
     if agent_config.record_test_for_each_commit:
         with open(experiment_log_dir / "eval_results.json", "w") as f:
@@ -256,7 +268,7 @@ def custom_run_agent_team_for_repo(
     update_queue.put(("finish_repo", repo_name))
 
 
-class DebugAgent(AiderAgents):
+class CodingAgent(AiderAgents):
     def run(
         self,
         implement_message: str,
@@ -300,7 +312,8 @@ class DebugAgent(AiderAgents):
         test_files = sorted(list(set([i.split(":")[0] for i in test_files_str])))
 
         io = InputOutput(
-            yes=True,
+            #yes=True,
+            yes=False, ## set yes to False to prevent the code from editing files which are not staged yet
             input_history_file=input_history_file,
             chat_history_file=chat_history_file,
         )
@@ -319,17 +332,32 @@ class DebugAgent(AiderAgents):
         # IMPLEMENTATION CODE
         coder.run(implement_message)
         
-        # DEBUGGING CODE
-        for test_file in test_files:
-            
-            # Get the base name (e.g., "tensor_data.py")
-            base_name = os.path.basename(fnames[0])
+        with open(log_dir / "temp-debugging-file.txt", "a+") as f:
+            f.write("fnames ")
+            json.dump(fnames, f)
+            f.write("\n")
+            json.dump(test_files, f)
+            f.write(f"\nlength {len(test_files)}\n")
+        
+        # Get the base name (e.g., "tensor_data.py")
+        base_name = os.path.basename(fnames[0])
 
-            # Split the file name and extension
-            file_name, _ = os.path.splitext(base_name)
-            
+        # Split the file name and extension
+        file_name, _ = os.path.splitext(base_name)
+
+        #logging debug
+        with open(log_dir / "temp-debugging-file.txt", "a+") as f:
+            f.write(f"implementing {file_name}")
+
+        # DEBUGGING CODE
+        for test_file in test_files:                
             if file_name in test_file:
-                for _ in range(2): # try to fix errrors in a file twice
+                ## logging debug
+                with open(log_dir / "temp-debugging-file.txt", "a+") as f:
+                    f.write(f"\n{file_name} is in {test_file}\n")
+                
+                n = 1
+                for _ in range(n): # try to fix errrors in a file n times
                                 
                     test_cmd = f"python -m commit0 test {repo_name} {test_file} " + test_cmd_second_half
                     # string of pytest output
@@ -341,6 +369,11 @@ class DebugAgent(AiderAgents):
                     
                     #test_output_list = [split_sections[i] + split_sections[i + 1] for i in range(1, len(split_sections) - 1, 2)]   
                     
+                    ## logging debug
+                    with open(log_dir / "temp-debugging-file.txt", "a+") as f:
+                        f.write(f"\n{test_file} split sections: ")
+                        json.dump(split_sections, f)
+                        f.write("\n")
 
                     for test_out in split_sections[1:]:
                         if True:# if "FAILED" not in test_out and "FFF" not in test_out:
@@ -349,6 +382,8 @@ class DebugAgent(AiderAgents):
                                     f"implementation. The unit test output is: \n {test_out}\n\n" +
                                     # f"If the failed unit test is not relevant to the functions in the files: {fnames}, then ignore this command and do nothing. Do not add any new files to chat." +
                                     f"The unit test failed is in the file {test_file}.")
+                            
+                    # TODO integrate rollback to this part of the debug agent
                                         
         
         sys.stdout.close()

@@ -9,10 +9,10 @@ from commit0.harness.constants import RUN_AGENT_LOG_DIR
 
 def get_args():
   parser = argparse.ArgumentParser()
-  parser.add_argument("--split", type=str, default='minitorch', help="The split of commit0 to implement and run unit test cases with.")
+  parser.add_argument("--split", type=str, default='parsel', help="The split of commit0 to implement and run unit test cases with.")
   parser.add_argument("--branch", default="commit0")
   parser.add_argument("--model-name", default="gpt-4o-mini", help="Model to use with commit0 agent.")
-  parser.add_argument("--setup", type=bool, default=True)
+  parser.add_argument("--setup", type=bool, default=False)
 
   return parser.parse_args()
 
