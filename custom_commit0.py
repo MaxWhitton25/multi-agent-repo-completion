@@ -2,6 +2,8 @@ import os
 import sys
 import yaml
 import multiprocessing
+import signal
+import time
 import bz2
 import re
 import logging
@@ -34,6 +36,9 @@ from datetime import datetime
 from agent.display import TerminalDisplay
 
 from custom_agent_utils import *
+
+def timeout_handler(signum, frame):
+    raise TimeoutError("agent run timed out")
 
 ### VERSION OF CUSTOM_RUN_AGENT_FOR_REPO which is up to date with git, not pip (11/12)
 def custom_run_agent_team_for_repo(
@@ -195,12 +200,45 @@ def custom_run_agent_team_for_repo(
                 # AND REVERT n times
                 # n = 2
                 # for _ in range(n):
-                agent_return = coder_agent.run(agent_config.user_prompt, 
-                    second_half_of_test_cmd, 
-                    lint_cmd, 
-                    [file_name], 
-                    file_log_dir, 
-                    repo_name=repo_name)
+                # Function to raise TimeoutError after timeout period
+
+                # Register the timeout handler
+                signal.signal(signal.SIGALRM, timeout_handler)
+                signal.alarm(1)  # Set an alarm to trigger after 'timeout' seconds
+
+                try:
+                    agent_return = coder_agent.run(agent_config.user_prompt, 
+                        second_half_of_test_cmd, 
+                        lint_cmd, 
+                        [file_name], 
+                        file_log_dir, 
+                        repo_name=repo_name)
+                except TimeoutError as e:
+                    agent_return = None
+                    print(f"Error: {e}")
+                finally:
+                    agent_return = None
+                    signal.alarm(0)  # Disable the alarm if the task completes in time
+                # process = multiprocessing.Process(target=coder_agent.run(agent_config.user_prompt, 
+                #     second_half_of_test_cmd, 
+                #     lint_cmd, 
+                #     [file_name], 
+                #     file_log_dir, 
+                #     repo_name=repo_name))
+                # process.daemon = False
+                # raise RuntimeError(process.daemon)
+                # process.start()
+                # process.join(timeout=600)
+                # if process.is_alive():
+                #     process.terminate()
+                #     process.join()
+                
+                # agent_return = coder_agent.run(agent_config.user_prompt, 
+                #     second_half_of_test_cmd, 
+                #     lint_cmd, 
+                #     [file_name], 
+                #     file_log_dir, 
+                #     repo_name=repo_name)
                         
                 """
                 START revert code
@@ -318,7 +356,7 @@ class CodingAgent(AiderAgents):
             chat_history_file=chat_history_file,
         )
 
-        # INNITIALIIZE AIDER
+        # INITIALIIZE AIDER
         coder = Coder.create(
             main_model=self.model,
             fnames=fnames,
@@ -358,9 +396,10 @@ class CodingAgent(AiderAgents):
                 
                 n = 1
                 for _ in range(n): # try to fix errrors in a file n times
-                                
+                   
                     test_cmd = f"python -m commit0 test {repo_name} {test_file} " + test_cmd_second_half
                     # string of pytest output
+                    #test_errors = subprocess.run(test_cmd, capture_output=True, text=True)
                     test_errors = coder.commands.cmd_test(test_cmd)
                     
                     # test output for each test case
