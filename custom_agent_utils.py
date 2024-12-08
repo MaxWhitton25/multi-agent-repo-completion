@@ -3,6 +3,7 @@ import json
 import subprocess
 from commit0.harness.utils import get_hash_string
 from commit0.harness.constants import RUN_PYTEST_LOG_DIR
+import git
 
 def parse_tasks(text: str) -> list[tuple[str, str]]:
     """Parse the tasks from the manager output."""
@@ -56,3 +57,7 @@ def get_test_results_json(repo_name: str, branch: str, commit0_config_file: str)
             return json.load(file)
     except FileNotFoundError:
         raise Exception(f"Test report file not found: {report_file}")
+    
+def revert_to_commit(repo: git.Repo, commit_hash: str) -> None:
+    """Revert the repository to the specified commit hash."""
+    repo.git.reset('--hard', commit_hash)

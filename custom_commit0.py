@@ -33,7 +33,7 @@ from pathlib import Path
 from datetime import datetime
 from agent.display import TerminalDisplay
 
-from custom_agent_utils import parse_tasks, get_test_results_json
+from custom_agent_utils import parse_tasks, get_test_results_json, revert_to_commit
 from map import get_test_mapping
 
 ### VERSION OF CUSTOM_RUN_AGENT_FOR_REPO which is up to date with git, not pip (11/12)
@@ -72,8 +72,9 @@ def custom_run_agent_team_for_repo(
         )
         
     test_mapping = get_test_mapping(Path(repo_path))
-    manager_agent = ManagerAgent(1, agent_config.model_name)
-    coder_agent = DebugAgent(agent_config.max_iteration, agent_config.model_name, test_mapping)
+    #manager_agent = ManagerAgent(1, agent_config.model_name)
+    coder_agent = DebugAgent(agent_config.max_iteration, agent_config.model_name, test_mapping, local_repo)
+    coder_agent.setup(repo_name, branch, commit0_config_file)
 
     # Check if there are changes in the current branch
     if local_repo.is_dirty():
@@ -107,7 +108,7 @@ def custom_run_agent_team_for_repo(
         local_repo, "HEAD", example["base_commit"]
     )
     # Call the commit0 get-tests command to retrieve test files
-    test_files_str = get_tests(repo_name, verbose=0)
+    test_files_str = [xx for x in get_tests(repo_name, verbose=0) for xx in x]
     test_files = sorted(list(set([i.split(":")[0] for i in test_files_str])))
 
     # prepare the log dir
@@ -222,9 +223,14 @@ def custom_run_agent_team_for_repo(
 
 class DebugAgent(AiderAgents):
     
-    def __init__(self, max_iteration: int, model_name: str, test_mapping: dict):
+    def __init__(self, max_iteration: int, model_name: str, test_mapping: dict, local_repo: Repo):
         super().__init__(max_iteration, model_name)
         self.test_mapping = test_mapping
+        self.local_repo = local_repo
+        self.prev_test_results = None
+        
+    def setup(self, repo_name: str, branch: str, commit0_config_file: str) -> None:
+        self.prev_test_results = get_test_results_json(repo_name, branch, commit0_config_file)
         
     def are_equivalent_errors(self, e1: dict, e2: dict) -> bool:
         """Compares two error messages, ignoring hex addresses like '0x...' regardless of context."""
@@ -272,6 +278,9 @@ class DebugAgent(AiderAgents):
                 ):
                 unique_errors.append(curr_test)
                 
+        unique_errors = [f"The unit test failed is {curr_test['nodeid']}\n\n" + \
+                        f"The unit test output is: \n {curr_test['call']['longrepr']}\n\n" + \
+                        f"The traceback of the unit test failed is: \n {curr_test['call']['traceback']}" for curr_test in unique_errors]
         return unique_errors
     
     def run(
@@ -308,9 +317,12 @@ class DebugAgent(AiderAgents):
         # Configure httpx and backoff logging
         handle_logging("httpx", log_file)
         handle_logging("backoff", log_file)
+        
+        # find hash of the latest commit
+        baseline_commit = self.local_repo.head.commit.hexsha
 
         io = InputOutput(
-            yes=True,
+            yes=False,
             input_history_file=input_history_file,
             chat_history_file=chat_history_file,
         )
@@ -330,32 +342,35 @@ class DebugAgent(AiderAgents):
         coder.run(implement_message)
         
         attempts = 0
-        test_results = None
-        while attempts < self.max_iteration and not test_results:
+        while attempts < self.max_iteration:
+        
+            test_results = None
+            error_info = None
             try:
                 test_results = get_test_results_json(repo_name, branch, commit0_config_file)
             except RuntimeError as e:
-                coder.run(f"The following error occured when running the test command: {e}\n\n" + 
-                        f"Modify or redo the functions just implemented in the file {fnames[0]} " +
-                        f"to resolve the error.")
-                attempts += 1
-        
-        if test_results:
-            unique_errors = self.find_unique_errors_for_file(test_results, fnames[0])      
+                error_info = e
             
-            # DEBUGGING CODE
-            for error in unique_errors:
-                
-                coder.run(f"Modify or redo the functions just implemented in the file {fnames[0]} " +
-                                f"to resolve the following failed unit test for your " +
-                                f"implementation. The unit test output is: \n {error["call"]["longrepr"]}\n\n" +
-                                # f"If the failed unit test is not relevant to the functions in the files: {fnames}, then ignore this command and do nothing. Do not add any new files to chat." +
-                                f"The traceback of the unit test failed is: \n {error["call"]["traceback"]}\n\n" +
-                                f"The specific unit test failed is {error["nodeid"]}.")
+            if test_results:
+                # check if the number of passed tests has decreased
+                if test_results["summary"]["passed"] <= self.prev_test_results["summary"]["passed"]:
+                    error_info = "\n".join(self.find_unique_errors_for_file(test_results, fnames[0]))     
+                    
+            if error_info:
                 coder.run("/reset")
                 coder.run(f"/add {fnames[0]}")
+                
+                prompt = implement_message + f"\n\nYour previous attempt to implement this file resulted in a decrease in the number of passed tests. When implementing this file, please keep in mind the following error output .\n\n{error_info}"
+                
+                revert_to_commit(self.local_repo, baseline_commit)
+                
+                coder.run(prompt)
+                attempts += 1
+            else:
+                break
+                
+        self.prev_test_results = test_results
                             
-        
         sys.stdout.close()
         sys.stderr.close()
         # Restore original stdout and stderr
