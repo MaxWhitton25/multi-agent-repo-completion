@@ -2,9 +2,6 @@ import os
 import sys
 import yaml
 import multiprocessing
-import signal
-import time
-import bz2
 import re
 import logging
 from agent.run_agent import DirContext, run_eval_after_each_commit
@@ -37,9 +34,7 @@ from agent.display import TerminalDisplay
 
 from custom_agent_utils import *
 
-def timeout_handler(signum, frame):
-    raise TimeoutError("agent run timed out")
-
+### NOTE not sure if this code is compatible with the current vesrion of commit0 or not
 ### VERSION OF CUSTOM_RUN_AGENT_FOR_REPO which is up to date with git, not pip (11/12)
 def custom_run_agent_team_for_repo(
     repo_base_dir: str,
@@ -71,8 +66,9 @@ def custom_run_agent_team_for_repo(
         raise Exception(
             f"{repo_path} is not a git repo. Check if base_dir is correctly specified."
         )
-        
-    #manager_agent = ManagerAgent(1, agent_config.model_name)
+
+    # NOTE initiialize custom CodingAgent
+        # TODO comment on the actions of the coding agent
     coder_agent = CodingAgent(agent_config.max_iteration, agent_config.model_name)
 
     # Check if there are changes in the current branch
@@ -82,7 +78,7 @@ def custom_run_agent_team_for_repo(
         # Commit changes with the message "left from last change"
         local_repo.index.commit("left from last change")
 
-    # # if branch_name is not provided, create a new branch name based on agent_config
+    # if branch_name is not provided, create a new branch name based on agent_config
     # if branch is None:
     #     branch = args2string(agent_config)
     create_branch(local_repo, branch, example["base_commit"])
@@ -103,9 +99,6 @@ def custom_run_agent_team_for_repo(
         agent_config.use_topo_sort_dependencies,
     )
 
-    # extract_function_stubs(os.path.join(repo_path, "parsel/selector.py"))
-    # raise RuntimeError("trying extract function stubs")
-
     # prepare the log dir
     experiment_log_dir = (
         Path(log_dir)
@@ -121,22 +114,10 @@ def custom_run_agent_team_for_repo(
     # Initialize baseline commit
     baseline_commit = local_repo.head.commit.hexsha
 
-    # Run initial evaluation to get baseline performance
-    initial_eval_results = run_eval_after_each_commit(
-        branch, backend, commit0_config_file
-    )
-    
-    # Search for the target repository line
-    pattern = fr"^{repo_name},[^,]+,(\d+)/(\d+)"
-    match = re.search(pattern, initial_eval_results, re.MULTILINE)
+    # don't evaluate baseline performance because it could result in no code ever getting written
+    # i.e. with simpy that starts out passing a lot of test cases
 
-    if match:
-        initial_num_passed_tests = int(match.group(1))
-        total_tests = int(match.group(2))
-    else:
-        raise RuntimeError(f"Searching for eval results didn't work {initial_eval_results}")
-
-    best_results = {'num_passed': initial_num_passed_tests, 'num_tests': total_tests}
+    best_results = {'num_passed': 0, 'num_tests': 0}
     """
     END revert code
     """
@@ -146,20 +127,6 @@ def custom_run_agent_team_for_repo(
     agent_config_log_file = experiment_log_dir / ".agent.yaml"
     with open(agent_config_log_file, "w") as agent_config_file:
         yaml.dump(agent_config, agent_config_file)
-        
-    # manager_message = f"""You are a manager in charge of writing a plan to complete the implementations for all functions (i.e., those with pass statements) and pass the unit tests. Write a plan of attack to implement the entire repo, keeping in mind the most effective order in which tasks should be implemented. Please output the plan in the format of a list of numbered steps. Each step should specify a file to edit and a high-level description of the change to make. Note that we only need to edit the files that contain functions with pass statements, ie. those in the current context. Give me ONLY the plan, with no extraneous text.
-    
-    # You MUST precede the plan with the keyword PLAN_START, and end it with the keyword PLAN_END. You MUST follow the formatting of the example plan below, with a number preceding each step on a new line, and one file name followed by a colon and a detailed description of the change to make:
-    
-    # PLAN_START
-    # 1.) example_file.py: description of function(s) to implement in example_file.py, including any relevant context or dependencies
-    # 2.) example_file2.py: description of function(s) to implement in example_file2.py, including any relevant context or dependencies
-    # ... 
-    # PLAN_END
-    
-    # Remember that you must modify all of the target edit files: {target_edit_files}
-    # The plan does not neccessarily need to edit the whole file in one step, and it may be more granular as you see fit. Keep in mind that the order in which the files/functions are implemented are very important; make sure that no functions' dependencies are being implemented before the function itself. You should look at the file 'spec.pdf' for more information on the project requirements and specifications.
-    # """
 
     with DirContext(repo_path):
         if agent_config is None:
@@ -170,23 +137,12 @@ def custom_run_agent_team_for_repo(
             file_log_dir = experiment_log_dir / file_name
             lint_cmd = get_lint_cmd(repo_name, agent_config.use_lint_info, commit0_config_file)
             
-            #agent_return = manager_agent.run(manager_message, target_edit_files, file_log_dir)
-            
-            # update_queue.put(
-            #     (
-            #         "update_money_display",
-            #         (repo_name, file_name, agent_return.last_cost),
-            #     )
-            # )
-                        
-            # with open(agent_return.log_file, 'r', encoding='utf-8') as file:
-            #     plan = file.read()
-            
-            # tasks = parse_tasks(plan)
-            
+            # iterate through target_edit_files, impl repository files in that order
+            file_impl_count = {}
             i = 0
             while i < len(target_edit_files):
                 file_name = target_edit_files[i]
+                file_impl_count[file_name] = file_impl_count.get(file_name, 0) + 1 # incr. # of times that file has been impl.
                 file_impl = False # indicator var for if a commit implementing this file is kept
                 update_queue.put(("set_current_file", (repo_name, file_name)))
 
@@ -196,50 +152,15 @@ def custom_run_agent_team_for_repo(
                 #implement_message = f"Implement the incomplete functions and classes in {file_name}. There should be no raise NotImplementedErrors left in the file."
                 second_half_of_test_cmd = f"--branch {branch} --commit0-config-file {commit0_config_file} --timeout 100"
                 
-                # MAKE THE DEBUG/CODER AGENT IMPLEMENT THE ORIGINAL TASK
-                # AND REVERT n times
-                # n = 2
-                # for _ in range(n):
-                # Function to raise TimeoutError after timeout period
+                # call run function for custom coder agent
+                # completes the implementation, runs pytest, and uses error output to make some edits (once)
+                agent_return = coder_agent.run(agent_config.user_prompt, 
+                    second_half_of_test_cmd, 
+                    lint_cmd, 
+                    [file_name], 
+                    file_log_dir, 
+                    repo_name=repo_name)
 
-                # Register the timeout handler
-                signal.signal(signal.SIGALRM, timeout_handler)
-                signal.alarm(1)  # Set an alarm to trigger after 'timeout' seconds
-
-                try:
-                    agent_return = coder_agent.run(agent_config.user_prompt, 
-                        second_half_of_test_cmd, 
-                        lint_cmd, 
-                        [file_name], 
-                        file_log_dir, 
-                        repo_name=repo_name)
-                except TimeoutError as e:
-                    agent_return = None
-                    print(f"Error: {e}")
-                finally:
-                    agent_return = None
-                    signal.alarm(0)  # Disable the alarm if the task completes in time
-                # process = multiprocessing.Process(target=coder_agent.run(agent_config.user_prompt, 
-                #     second_half_of_test_cmd, 
-                #     lint_cmd, 
-                #     [file_name], 
-                #     file_log_dir, 
-                #     repo_name=repo_name))
-                # process.daemon = False
-                # raise RuntimeError(process.daemon)
-                # process.start()
-                # process.join(timeout=600)
-                # if process.is_alive():
-                #     process.terminate()
-                #     process.join()
-                
-                # agent_return = coder_agent.run(agent_config.user_prompt, 
-                #     second_half_of_test_cmd, 
-                #     lint_cmd, 
-                #     [file_name], 
-                #     file_log_dir, 
-                #     repo_name=repo_name)
-                        
                 """
                 START revert code
                 """
@@ -264,13 +185,16 @@ def custom_run_agent_team_for_repo(
                 )
 
                 revert_info = ""
-                if performance_improved:
+                if performance_improved or file_impl_count[file_name] >= 3:
                     # Keep changes
                     file_impl = True
                     baseline_commit = local_repo.head.commit.hexsha
-                    revert_info += f"\nNo revert, current hash {baseline_commit}"
+                    if file_impl_count[file_name] >= 3:
+                        revert_info += f"\nMax impl. reached (no revert), current hash {baseline_commit}"
+                    else:
+                        revert_info += f"\nImproved perf. (no revert), current hash {baseline_commit}"
+                    
                     best_results = current_results
-                    #break # don't try implementing again if don't need to revert
                 else:
                     # Revert changes
                     revert_info += f"\nReverted to {baseline_commit}"
@@ -307,6 +231,10 @@ def custom_run_agent_team_for_repo(
 
 
 class CodingAgent(AiderAgents):
+    """
+    Implements files in fnames list
+    
+    """
     def run(
         self,
         implement_message: str,
@@ -350,14 +278,13 @@ class CodingAgent(AiderAgents):
         test_files = sorted(list(set([i.split(":")[0] for i in test_files_str])))
 
         io = InputOutput(
-            #yes=True,
             yes=False, ## set yes to False to prevent the code from editing files which are not staged yet
             input_history_file=input_history_file,
             chat_history_file=chat_history_file,
         )
 
-        # INITIALIIZE AIDER
-        coder = Coder.create(
+        # INNITIALIIZE AIDER
+        aider_coder = Coder.create(
             main_model=self.model,
             fnames=fnames,
             auto_lint=auto_lint,
@@ -367,10 +294,10 @@ class CodingAgent(AiderAgents):
             io=io,
         )
 
-        # IMPLEMENTATION CODE
-        coder.run(implement_message)
+        # aider IMPLEMENTS the file 
+        aider_coder.run(implement_message)
         
-        with open(log_dir / "temp-debugging-file.txt", "a+") as f:
+        with open(log_dir / "coding-agent-log-file.txt", "a+") as f:
             f.write("fnames ")
             json.dump(fnames, f)
             f.write("\n")
@@ -383,46 +310,59 @@ class CodingAgent(AiderAgents):
         # Split the file name and extension
         file_name, _ = os.path.splitext(base_name)
 
-        #logging debug
-        with open(log_dir / "temp-debugging-file.txt", "a+") as f:
+        # logging for debug
+        with open(log_dir / "coding-agent-log-file.txt", "a+") as f:
             f.write(f"implementing {file_name}")
 
         # DEBUGGING CODE
         for test_file in test_files:                
             if file_name in test_file:
-                ## logging debug
-                with open(log_dir / "temp-debugging-file.txt", "a+") as f:
+                # logging for debug
+                with open(log_dir / "coding-agent-log-file.txt", "a+") as f:
                     f.write(f"\n{file_name} is in {test_file}\n")
                 
                 n = 1
-                for _ in range(n): # try to fix errrors in a file n times
-                   
+                for _ in range(n): # try to fix the test case errors in a file n times
+                                
                     test_cmd = f"python -m commit0 test {repo_name} {test_file} " + test_cmd_second_half
-                    # string of pytest output
-                    #test_errors = subprocess.run(test_cmd, capture_output=True, text=True)
-                    test_errors = coder.commands.cmd_test(test_cmd)
-                    
-                    # test output for each test case
-                    header_pattern = r"_{4,} .+ _{4,}"
-                    split_sections = re.split(header_pattern, test_errors)        
-                    
-                    #test_output_list = [split_sections[i] + split_sections[i + 1] for i in range(1, len(split_sections) - 1, 2)]   
-                    
-                    ## logging debug
-                    with open(log_dir / "temp-debugging-file.txt", "a+") as f:
-                        f.write(f"\n{test_file} split sections: ")
-                        json.dump(split_sections, f)
-                        f.write("\n")
 
-                    for test_out in split_sections[1:]:
-                        if True:# if "FAILED" not in test_out and "FFF" not in test_out:
-                            coder.run(f"Modify or redo the functions just implemented in the file {fnames} " +
-                                    f"to resolve the following failed unit test for your " +
-                                    f"implementation. The unit test output is: \n {test_out}\n\n" +
-                                    # f"If the failed unit test is not relevant to the functions in the files: {fnames}, then ignore this command and do nothing. Do not add any new files to chat." +
-                                    f"The unit test failed is in the file {test_file}.")
-                            
-                    # TODO integrate rollback to this part of the debug agent
+                    # NOTE trying to run the shell command not through aider
+                    # to see if that removes my issue with infinite running software
+                    result = subprocess.run(
+                        test_cmd,
+                        shell=True,
+                        text=True,
+                        stderr=subprocess.PIPE,
+                        stdout=subprocess.PIPE,
+                        capture_output=True
+                    )
+                    test_errors = result.stderr
+
+                    # runs test_cmd on shell and adds output to the chat
+                    #test_errors = aider_coder.commands.cmd_test(test_cmd)
+
+                    aider_coder.run(f"Modify or rewrite the functions implemented in the file {fnames} " +
+                                    f"to resolve the failed unit tests." +
+                                    f"The unit test output is: \n {test_errors}\n\n")
+
+                    # NOTE code for askign aider to edit code unit test case by unit test case is commented out below
+                    # test output for each test case
+                    # header_pattern = r"_{4,} .+ _{4,}"
+                    # split_sections = re.split(header_pattern, test_errors)        
+                                    
+                    ## logging debug
+                    # with open(log_dir / "coding-agent-log-file.txt", "a+") as f:
+                    #     f.write(f"\n{test_file} split sections: ")
+                    #     json.dump(split_sections, f)
+                    #     f.write("\n")
+
+                    # for test_out in split_sections[1:]:
+                    #     if True:# if "FAILED" not in test_out and "FFF" not in test_out:
+                    #         aider_coder.run(f"Modify or redo the functions just implemented in the file {fnames} " +
+                    #                 f"to resolve the following failed unit test for your " +
+                    #                 f"implementation. The unit test output is: \n {test_out}\n\n")
+                    #                 # f"If the failed unit test is not relevant to the functions in the files: {fnames}, then ignore this command and do nothing. Do not add any new files to chat." +
+                    #                 # f"The unit test failed is in the file {test_file}."
                                         
         
         sys.stdout.close()
@@ -432,65 +372,3 @@ class CodingAgent(AiderAgents):
         sys.stderr = sys.__stderr__
 
         return AiderReturn(log_file)
-
-
-class ManagerAgent(AiderAgents):
-        
-    def run(
-        self,
-        message: str,
-        fnames: list[str],
-        log_dir: Path,
-    ) -> AgentReturn:
-        """Start agent manager"""
-        
-        log_dir = log_dir.resolve()
-        log_dir.mkdir(parents=True, exist_ok=True)
-        input_history_file = log_dir / ".manager.input.history"
-        chat_history_file = log_dir / ".manager.chat.history.md"
-
-        # Set up logging
-        log_file = log_dir / "manager.log"
-        logging.basicConfig(
-            filename=log_file,
-            level=logging.INFO,
-            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        )
-
-        # Redirect print statements to the log file
-        sys.stdout = open(log_file, "a")
-        sys.stderr = open(log_file, "a")
-
-        # Configure httpx and backoff logging
-        handle_logging("httpx", log_file)
-        handle_logging("backoff", log_file)
-        
-        # Get the specifications
-        with bz2.open("spec.pdf.bz2", "rb") as in_file:
-            with open("spec.pdf", "wb") as out_file:
-                out_file.write(in_file.read())
-
-        io = InputOutput(
-            yes=False,
-            input_history_file=input_history_file,
-            chat_history_file=chat_history_file,
-        )
-        manager = Coder.create(
-            edit_format="ask",
-            main_model=self.model,
-            read_only_fnames=fnames + ["spec.pdf"],
-            io=io,
-        )
-        manager.max_reflection = self.max_iteration
-        manager.stream = True
-        
-        manager.run(message)
-
-        sys.stdout.close()
-        sys.stderr.close()
-        # Restore original stdout and stderr
-        sys.stdout = sys.__stdout__
-        sys.stderr = sys.__stderr__
-
-        return AiderReturn(log_file)
-
